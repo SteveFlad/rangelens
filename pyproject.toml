@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rangelens"
+version = "0.1.0"
+description = "Windows-first OptiShot dispersion and coaching app"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "PyQt6>=6.6.0",
+  "hidapi>=0.14.0",
+  "numpy>=1.26.0",
+  "pyqtgraph>=0.13.7",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+  "ruff>=0.6.0",
+]
+
+[tool.setuptools]
+packages = ["app"]
