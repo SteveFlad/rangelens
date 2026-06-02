@@ -1,4 +1,3 @@
-from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -12,8 +11,10 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from PyQt6.QtGui import QCloseEvent
 
 from app.config import APP_NAME, APP_VERSION
+from app.device.optishot_reader import OptiShotDeviceError
 from app.services.session_service import SessionService
 
 
@@ -21,7 +22,7 @@ class MainWindow(QMainWindow):
     def __init__(self, mock_mode: bool = False):
         super().__init__()
         self.mock_mode = mock_mode
-        self.session_service = SessionService()
+        self.session_service = SessionService(mock_mode=mock_mode)
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         self.resize(1100, 700)
         self._setup_ui()
@@ -35,7 +36,7 @@ class MainWindow(QMainWindow):
         self.mode_label = QLabel("Mode: Mock" if self.mock_mode else "Mode: Device")
         self.club_combo = QComboBox()
         self.club_combo.addItems(["Driver", "5-Wood", "7-Iron", "PW"])
-        self.capture_button = QPushButton("Capture Mock Shot")
+        self.capture_button = QPushButton("Capture Mock Shot" if self.mock_mode else "Capture Device Shot")
         self.capture_button.clicked.connect(self._capture_shot)
         top_bar.addWidget(self.mode_label)
         top_bar.addStretch()
@@ -61,9 +62,13 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Ready")
 
     def _capture_shot(self) -> None:
-        record, summary, insights = self.session_service.capture_mock_shot(
-            self.club_combo.currentText()
-        )
+        try:
+            record, summary, insights = self.session_service.capture_shot(
+                self.club_combo.currentText()
+            )
+        except OptiShotDeviceError as exc:
+            self.statusBar().showMessage(str(exc), 5000)
+            return
         row = self.table.rowCount()
         self.table.insertRow(row)
         values = [
@@ -85,4 +90,9 @@ class MainWindow(QMainWindow):
         self.summary_list.addItem(f"Max radius: {summary.max_radius} yd")
         self.summary_list.addItem(f"Dominant miss: {summary.dominant_miss}")
         self.insights_box.setPlainText("\n".join(insights))
-        self.statusBar().showMessage("Mock shot captured", 3000)
+        source = "Mock" if self.mock_mode else "Device"
+        self.statusBar().showMessage(f"{source} shot captured", 3000)
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        self.session_service.close()
+        super().closeEvent(event)
