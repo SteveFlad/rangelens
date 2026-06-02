@@ -34,6 +34,14 @@ pip install -r requirements.txt
 python -m app.main --mock
 ```
 
+To capture from a real OptiShot 2, connect the device and run without `--mock`:
+
+```powershell
+python -m app.main
+```
+
+RangeLens discovers the OptiShot 2 over HID using VID/PID `0547:3294`, sends the standard sensor-enable command sequence, and parses the device's 60-byte input reports into shot speed, face angle, path, and contact data. Mock mode remains available when hardware is unavailable.
+
 ## Planned Project Structure
 
 ```text

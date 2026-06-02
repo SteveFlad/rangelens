@@ -1,4 +1,4 @@
-from app.device.mock_reader import ShotInput
+from app.device.models import ShotInput
 from app.domain.models import ShotRecord
 
 
