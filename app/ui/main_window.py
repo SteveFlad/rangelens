@@ -93,6 +93,6 @@ class MainWindow(QMainWindow):
         source = "Mock" if self.mock_mode else "Device"
         self.statusBar().showMessage(f"{source} shot captured", 3000)
 
-    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+    def closeEvent(self, event: QCloseEvent) -> None:
         self.session_service.close()
         super().closeEvent(event)
