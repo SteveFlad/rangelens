@@ -10,12 +10,12 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS shots (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id TEXT NOT NULL,
-  timestamp TEXT NOT NULL,
   club TEXT NOT NULL,
   source_mode TEXT NOT NULL,
   club_speed_mph REAL,
   face_angle_deg REAL,
   path_deg REAL,
+  contact_point REAL,
   carry_yards REAL,
   lateral_yards REAL,
   shot_shape TEXT,

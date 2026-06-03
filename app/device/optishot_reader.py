@@ -221,6 +221,31 @@ class OptiShotReader:
         self._initialize_device()
         return self._device_info
 
+    def check_for_swing(self, club: str) -> ShotInput | None:
+        """Non-blocking check for swing. Returns shot if detected, None otherwise."""
+        self.connect()
+        
+        report = self._read_report()
+        if not report:
+            return None
+        
+        if self._previous_report is not None and report == self._previous_report:
+            return None
+        
+        self._previous_report = report
+        shot = self._parser.feed_report(report, club)
+        
+        if shot is not None:
+            # Reset parser for next swing detection
+            self._parser.reset()
+            self._previous_report = None
+            # Turn LED RED briefly, then GREEN to indicate shot captured
+            self._send_command(OPTISHOT_CMD_LED_RED)
+            time.sleep(0.05)
+            self._send_command(OPTISHOT_CMD_LED_GREEN)
+        
+        return shot
+
     def capture_shot(
         self,
         club: str,
@@ -230,20 +255,32 @@ class OptiShotReader:
         self._parser.reset()
         self._previous_report = None
 
-        deadline = time.monotonic() + timeout_seconds
-        while time.monotonic() < deadline:
-            report = self._read_report()
-            if not report:
-                time.sleep(0.01)
-                continue
-            if self._previous_report is not None and report == self._previous_report:
-                continue
-            self._previous_report = report
-            shot = self._parser.feed_report(report, club)
-            if shot is not None:
-                return shot
+        # Turn LED RED to indicate not ready / busy capturing
+        self._send_command(OPTISHOT_CMD_LED_RED)
 
-        raise OptiShotDeviceError("Timed out waiting for an OptiShot swing report.")
+        try:
+            deadline = time.monotonic() + timeout_seconds
+            while time.monotonic() < deadline:
+                report = self._read_report()
+                if not report:
+                    time.sleep(0.01)
+                    continue
+                if self._previous_report is not None and report == self._previous_report:
+                    continue
+                self._previous_report = report
+                shot = self._parser.feed_report(report, club)
+                if shot is not None:
+                    # Turn LED GREEN to indicate ready for next swing
+                    self._send_command(OPTISHOT_CMD_LED_GREEN)
+                    return shot
+
+            # Timeout - turn LED GREEN to indicate ready again
+            self._send_command(OPTISHOT_CMD_LED_GREEN)
+            raise OptiShotDeviceError("Timed out waiting for an OptiShot swing report.")
+        except Exception:
+            # On any error, ensure LED turns GREEN again
+            self._send_command(OPTISHOT_CMD_LED_GREEN)
+            raise
 
     def close(self) -> None:
         if self._device is None:
