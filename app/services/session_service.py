@@ -8,6 +8,7 @@ from app.analytics.dispersion import summarize_dispersion
 from app.analytics.coaching_rules import coaching_insights
 from app.device.optishot_reader import OptiShotReader
 from app.device.mock_reader import MockReader
+from app.domain.models import ShotRecord
 
 
 class SessionService:
@@ -56,6 +57,29 @@ class SessionService:
                     'lateral_yards': shot.lateral_yards,
                     'shot_shape': shot.shot_shape
                 })
+
+    def import_from_csv(self, filepath: str) -> int:
+        """Import shots from CSV file. Returns number of shots loaded."""
+        path = Path(filepath)
+        imported_shots = []
+        
+        with path.open('r', encoding='utf-8') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                shot = ShotRecord(
+                    club=row['club'],
+                    club_speed_mph=float(row['club_speed_mph']),
+                    face_angle_deg=float(row['face_angle_deg']),
+                    path_deg=float(row['path_deg']),
+                    contact_point=float(row['contact_point']),
+                    carry_yards=float(row['carry_yards']),
+                    lateral_yards=float(row['lateral_yards']),
+                    shot_shape=row['shot_shape']
+                )
+                imported_shots.append(shot)
+        
+        self.shots.extend(imported_shots)
+        return len(imported_shots)
 
     def close(self) -> None:
         close = getattr(self.reader, "close", None)
