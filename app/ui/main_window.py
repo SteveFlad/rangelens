@@ -113,6 +113,10 @@ class MainWindow(QMainWindow):
         self.table.setHorizontalHeaderLabels([
             "Club", "Speed Mph", "Face", "Path", "Contact", "Carry Yds", "Lateral Yds", "Shape"
         ])
+        # Left-align table column headers
+        from PyQt6.QtCore import Qt
+        header = self.table.horizontalHeader()
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(self.table)
 
         bottom = QHBoxLayout()
