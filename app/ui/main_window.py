@@ -17,6 +17,11 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QCloseEvent
 
+import matplotlib
+matplotlib.use('QtAgg')
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from matplotlib.figure import Figure
+
 from app.config import APP_NAME, APP_VERSION
 from app.device.optishot_reader import OptiShotDeviceError
 from app.services.session_service import SessionService
@@ -109,6 +114,11 @@ class MainWindow(QMainWindow):
         top_bar.addWidget(self.export_button)
         layout.addLayout(top_bar)
 
+        # Data section
+        data_label = QLabel("Shot Data Table")
+        data_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        layout.addWidget(data_label)
+        
         self.table = QTableWidget(0, 8)
         self.table.setHorizontalHeaderLabels([
             "Club", "Speed Mph", "Face", "Path", "Contact", "Carry Yds", "Lateral Yds", "Shape"
@@ -120,14 +130,39 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.table)
 
         bottom = QHBoxLayout()
+        
+        # Averages section
+        averages_section = QVBoxLayout()
+        averages_label = QLabel("Summary Statistics")
+        averages_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        averages_section.addWidget(averages_label)
+        
+        # Create matplotlib canvas for overhead view
+        self.figure = Figure(figsize=(5, 4))
+        self.canvas = FigureCanvasQTAgg(self.figure)
+        self.ax = self.figure.add_subplot(111)
+        averages_section.addWidget(self.canvas)
+        
         self.summary_list = QListWidget()
+        averages_section.addWidget(self.summary_list)
+        bottom.addLayout(averages_section, 1)
+        
+        # Coach section
+        coach_section = QVBoxLayout()
+        coach_label = QLabel("Coaching Insights")
+        coach_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        coach_section.addWidget(coach_label)
         self.insights_box = QTextEdit()
         self.insights_box.setReadOnly(True)
-        bottom.addWidget(self.summary_list, 1)
-        bottom.addWidget(self.insights_box, 2)
+        coach_section.addWidget(self.insights_box)
+        bottom.addLayout(coach_section, 2)
+        
         layout.addLayout(bottom)
 
         self.statusBar().showMessage("Ready")
+        
+        # Initialize the flight plot
+        self._update_flight_plot()
 
     def _setup_auto_detect(self) -> None:
         """Setup timer for automatic swing detection."""
@@ -232,9 +267,11 @@ class MainWindow(QMainWindow):
         self.summary_list.addItem(f"Shots: {summary.shot_count}")
         self.summary_list.addItem(f"Avg carry: {summary.avg_carry} yd")
         self.summary_list.addItem(f"Avg lateral: {summary.avg_lateral} yd")
+        self.summary_list.addItem(f"Avg contact: {_describe_contact(summary.avg_contact)}")
         self.summary_list.addItem(f"Max radius: {summary.max_radius} yd")
         self.summary_list.addItem(f"Dominant miss: {summary.dominant_miss}")
         self.insights_box.setPlainText("\n".join(insights))
+        self._update_flight_plot()
         self.statusBar().showMessage("Shot detected and captured!", 2000)
 
     def _log_error(self, message: str) -> None:
@@ -244,6 +281,60 @@ class MainWindow(QMainWindow):
         error_log = f"[{timestamp}] ERROR: {message}\n\n"
         current_text = self.insights_box.toPlainText()
         self.insights_box.setPlainText(error_log + current_text)
+
+    def _update_flight_plot(self) -> None:
+        """Update the overhead view plot of ball flight."""
+        self.ax.clear()
+        
+        if not self.session_service.shots:
+            self.ax.text(0.5, 0.5, 'No shots yet', 
+                        horizontalalignment='center', 
+                        verticalalignment='center',
+                        transform=self.ax.transAxes,
+                        fontsize=12, color='gray')
+            self.ax.set_xlim(-50, 50)
+            self.ax.set_ylim(0, 300)
+        else:
+            # Extract lateral (x) and carry (y) data
+            laterals = [shot.lateral_yards for shot in self.session_service.shots]
+            carries = [shot.carry_yards for shot in self.session_service.shots]
+            
+            # Plot shots as scatter points
+            self.ax.scatter(laterals, carries, alpha=0.6, s=50, c='blue', edgecolors='black', linewidth=0.5)
+            
+            # Add average point
+            avg_lateral = sum(laterals) / len(laterals)
+            avg_carry = sum(carries) / len(carries)
+            self.ax.scatter([avg_lateral], [avg_carry], s=200, c='red', marker='x', linewidths=3, label='Average')
+            
+            # Add target (0, average carry)
+            self.ax.scatter([0], [avg_carry], s=200, c='green', marker='+', linewidths=3, label='Target')
+            
+            # Set axis limits with some padding
+            x_margin = max(20, max(abs(min(laterals)), abs(max(laterals))) * 0.3)
+            y_margin = (max(carries) - min(carries)) * 0.2 if len(carries) > 1 else 20
+            self.ax.set_xlim(min(laterals) - x_margin, max(laterals) + x_margin)
+            self.ax.set_ylim(min(carries) - y_margin, max(carries) + y_margin)
+            
+            self.ax.legend(loc='upper right', fontsize=8)
+        
+        # Styling
+        self.ax.set_xlabel('Lateral Distance (yards)', fontsize=9)
+        self.ax.set_ylabel('Carry Distance (yards)', fontsize=9)
+        self.ax.set_title('Overhead View - Ball Flight', fontsize=10, fontweight='bold')
+        self.ax.grid(True, alpha=0.3, linestyle='--')
+        self.ax.axhline(y=0, color='k', linewidth=0.5)
+        self.ax.axvline(x=0, color='k', linewidth=0.5)
+        self.ax.tick_params(labelsize=8)
+        
+        # Add directional labels
+        self.ax.text(0.02, 0.98, 'Left', transform=self.ax.transAxes, 
+                    fontsize=8, verticalalignment='top', color='gray')
+        self.ax.text(0.98, 0.98, 'Right', transform=self.ax.transAxes, 
+                    fontsize=8, verticalalignment='top', horizontalalignment='right', color='gray')
+        
+        self.figure.tight_layout()
+        self.canvas.draw()
 
     def _capture_shot(self) -> None:
         if not self.mock_mode:
@@ -276,9 +367,11 @@ class MainWindow(QMainWindow):
         self.summary_list.addItem(f"Shots: {summary.shot_count}")
         self.summary_list.addItem(f"Avg carry: {summary.avg_carry} yd")
         self.summary_list.addItem(f"Avg lateral: {summary.avg_lateral} yd")
+        self.summary_list.addItem(f"Avg contact: {_describe_contact(summary.avg_contact)}")
         self.summary_list.addItem(f"Max radius: {summary.max_radius} yd")
         self.summary_list.addItem(f"Dominant miss: {summary.dominant_miss}")
         self.insights_box.setPlainText("\n".join(insights))
+        self._update_flight_plot()
         source = "Mock" if self.mock_mode else "Device"
         self.statusBar().showMessage(f"{source} shot captured", 3000)
         
@@ -333,12 +426,15 @@ class MainWindow(QMainWindow):
             self.summary_list.addItem(f"Shots: {summary.shot_count}")
             self.summary_list.addItem(f"Avg carry: {summary.avg_carry} yd")
             self.summary_list.addItem(f"Avg lateral: {summary.avg_lateral} yd")
+            self.summary_list.addItem(f"Avg contact: {_describe_contact(summary.avg_contact)}")
             self.summary_list.addItem(f"Max radius: {summary.max_radius} yd")
             self.summary_list.addItem(f"Dominant miss: {summary.dominant_miss}")
             self.insights_box.setPlainText("\n".join(insights))
+            self._update_flight_plot()
         else:
             self.summary_list.clear()
             self.insights_box.clear()
+            self._update_flight_plot()
 
     def _clear_session(self) -> None:
         """Clear all session data without saving."""
@@ -353,6 +449,7 @@ class MainWindow(QMainWindow):
         self.table.setRowCount(0)
         self.summary_list.clear()
         self.insights_box.clear()
+        self._update_flight_plot()
         
         self.statusBar().showMessage("Session cleared", 3000)
 
