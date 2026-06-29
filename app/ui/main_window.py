@@ -69,6 +69,7 @@ class MainWindow(QMainWindow):
         self.resize(1100, 700)
         self.auto_detect_enabled = False
         self._error_disabled = False  # Track if disabled due to error
+        self._last_shot_time = 0.0  # Track time of last detected shot for cooldown
         self._setup_ui()
         self._setup_auto_detect()
 
@@ -202,10 +203,17 @@ class MainWindow(QMainWindow):
         if not self.auto_detect_enabled or self.mock_mode:
             return
         
+        # Cooldown period after last shot to let device settle
+        import time
+        current_time = time.monotonic()
+        if current_time - self._last_shot_time < 0.2:  # 200ms cooldown
+            return
+        
         try:
             shot = self.session_service.reader.check_for_swing(self.club_combo.currentText())
             if shot is not None:
                 # Process the detected shot
+                self._last_shot_time = current_time
                 self._set_led_red()  # Indicate busy processing
                 self._process_shot(shot)
                 self._set_led_green()  # Back to ready

@@ -77,10 +77,19 @@ class OptiShotShotParser:
         self._back_activations: list[tuple[int, int]] = []
         self._front_window = _ActivationWindow()
         self._back_window = _ActivationWindow()
+        self._first_data_time: float = 0.0  # Track when we first started accumulating data
+    
+    def is_accumulating(self) -> bool:
+        """Check if parser has started accumulating swing data."""
+        return self._back_origin or self._front_triggered or len(self._front_activations) > 0 or len(self._back_activations) > 0
 
-    def feed_report(self, report: Sequence[int], club: str) -> ShotInput | None:
+    def feed_report(self, report: Sequence[int], club: str, current_time: float) -> ShotInput | None:
         if len(report) < OPTISHOT_REPORT_SIZE:
             return None
+        
+        # Track first time we see any data
+        if not self.is_accumulating() and self._first_data_time == 0.0:
+            self._first_data_time = current_time
 
         for offset in range(0, OPTISHOT_REPORT_SIZE, OPTISHOT_SUBPACKET_SIZE):
             front_byte = int(report[offset])
@@ -189,6 +198,7 @@ class OptiShotReader:
         self._device_info: DeviceInfo | None = None
         self._parser = OptiShotShotParser()
         self._previous_report: list[int] | None = None
+        self._parser_timeout = 2.0  # Reset parser if accumulating data for more than 2 seconds
 
     def discover_devices(self) -> list[DeviceInfo]:
         hid_module = self._get_hid_module()
@@ -225,26 +235,61 @@ class OptiShotReader:
         """Non-blocking check for swing. Returns shot if detected, None otherwise."""
         self.connect()
         
+        current_time = time.monotonic()
+        
+        # Check if parser has been accumulating data for too long (likely noise)
+        if self._parser.is_accumulating():
+            elapsed = current_time - self._parser._first_data_time
+            if elapsed > self._parser_timeout:
+                # Reset parser - it's been collecting noise, not a real swing
+                self._parser.reset()
+                self._previous_report = None
+                return None
+        
         report = self._read_report()
         if not report:
             return None
         
+        # Ignore duplicate reports
         if self._previous_report is not None and report == self._previous_report:
             return None
         
+        # Ignore reports with very minimal activity (likely noise)
+        if not self._parser.is_accumulating() and not self._has_significant_activity(report):
+            return None
+        
         self._previous_report = report
-        shot = self._parser.feed_report(report, club)
+        shot = self._parser.feed_report(report, club, current_time)
         
         if shot is not None:
             # Reset parser for next swing detection
             self._parser.reset()
+            # Thorough buffer flush to clear all residual data
+            # UI cooldown prevents us from checking again too soon
+            self._flush_device_buffer(quick=False)
             self._previous_report = None
-            # Turn LED RED briefly, then GREEN to indicate shot captured
+            # Visual feedback
             self._send_command(OPTISHOT_CMD_LED_RED)
-            time.sleep(0.05)
             self._send_command(OPTISHOT_CMD_LED_GREEN)
         
         return shot
+    
+    def _has_significant_activity(self, report: list[int]) -> bool:
+        """Check if report has significant sensor activity (not just noise)."""
+        if len(report) < OPTISHOT_REPORT_SIZE:
+            return False
+        
+        # Count how many sensors are active across all subpackets
+        active_count = 0
+        for offset in range(0, OPTISHOT_REPORT_SIZE, OPTISHOT_SUBPACKET_SIZE):
+            front_byte = int(report[offset])
+            back_byte = int(report[offset + 1])
+            # Count active sensors (bits set)
+            active_count += bin(front_byte).count('1')
+            active_count += bin(back_byte).count('1')
+        
+        # Require at least 3 active sensors to consider it real activity
+        return active_count >= 3
 
     def capture_shot(
         self,
@@ -261,6 +306,7 @@ class OptiShotReader:
         try:
             deadline = time.monotonic() + timeout_seconds
             while time.monotonic() < deadline:
+                current_time = time.monotonic()
                 report = self._read_report()
                 if not report:
                     time.sleep(0.01)
@@ -268,7 +314,7 @@ class OptiShotReader:
                 if self._previous_report is not None and report == self._previous_report:
                     continue
                 self._previous_report = report
-                shot = self._parser.feed_report(report, club)
+                shot = self._parser.feed_report(report, club, current_time)
                 if shot is not None:
                     # Turn LED GREEN to indicate ready for next swing
                     self._send_command(OPTISHOT_CMD_LED_GREEN)
@@ -316,6 +362,30 @@ class OptiShotReader:
             return
         report = [0x00, command] + [0x00] * (OPTISHOT_REPORT_SIZE - 1)
         self._device.write(report)
+
+    def _flush_device_buffer(self, quick: bool = False) -> None:
+        """Flush device buffer by reading and discarding reports.
+        
+        Args:
+            quick: If True, only flush for ~50ms or until buffer is empty.
+                   If False, flush more thoroughly for ~150ms.
+        """
+        if self._device is None:
+            return
+        
+        flush_duration = 0.05 if quick else 0.15  # 50ms for quick, 150ms for thorough
+        flush_start = time.monotonic()
+        empty_count = 0
+        
+        while time.monotonic() - flush_start < flush_duration:
+            report = self._read_report()
+            if not report:
+                empty_count += 1
+                if empty_count >= 2:  # Two consecutive empty reads = buffer clear
+                    break
+                time.sleep(0.005)  # Brief pause before checking again
+            else:
+                empty_count = 0  # Reset if we got data
 
     def _get_hid_module(self) -> Any:
         if self._hid_module is None:
