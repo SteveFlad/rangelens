@@ -1,4 +1,5 @@
 import argparse
+import logging
 import sys
 
 from PyQt6.QtWidgets import QApplication
@@ -13,6 +14,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    # Configure logging to show timestamps and level
+    logging.basicConfig(
+        level=logging.INFO,
+        format='[%(asctime)s] %(levelname)s: %(message)s',
+        datefmt='%H:%M:%S'
+    )
+    
     args = parse_args()
     app = QApplication(sys.argv)
     window = MainWindow(mock_mode=args.mock)

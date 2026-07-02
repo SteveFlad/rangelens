@@ -6,16 +6,18 @@ from PyQt6.QtWidgets import (
     QLabel,
     QListWidget,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
+    QSystemTrayIcon,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
-from PyQt6.QtCore import QTimer
-from PyQt6.QtGui import QCloseEvent
+from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtGui import QAction, QCloseEvent, QIcon
 
 import matplotlib
 matplotlib.use('QtAgg')
@@ -25,6 +27,7 @@ from matplotlib.figure import Figure
 from app.config import APP_NAME, APP_VERSION
 from app.device.optishot_reader import OptiShotDeviceError
 from app.services.session_service import SessionService
+from app.ui.floating_button import FloatingButton
 
 
 def _describe_face_angle(face_angle_deg: float) -> str:
@@ -67,11 +70,13 @@ class MainWindow(QMainWindow):
         self.session_service = SessionService(mock_mode=mock_mode)
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         self.resize(1100, 700)
-        self.auto_detect_enabled = False
+        self.auto_detect_enabled = not mock_mode  # Auto-detect always on in device mode
         self._error_disabled = False  # Track if disabled due to error
         self._last_shot_time = 0.0  # Track time of last detected shot for cooldown
         self._setup_ui()
         self._setup_auto_detect()
+        self._setup_system_tray()
+        self._setup_floating_button()
 
     def _setup_ui(self) -> None:
         root = QWidget()
@@ -88,15 +93,15 @@ class MainWindow(QMainWindow):
         if not self.mock_mode:
             self._set_led_green()
         
-        self.auto_detect_checkbox = QCheckBox("Auto-Detect Swings")
-        self.auto_detect_checkbox.stateChanged.connect(self._toggle_auto_detect)
-        if self.mock_mode:
-            self.auto_detect_checkbox.setEnabled(False)
-            self.auto_detect_checkbox.setToolTip("Auto-detect not available in mock mode")
+        # Button to show/hide floating button
+        self.floating_button_toggle = QPushButton("Show Floating Button")
+        self.floating_button_toggle.setCheckable(True)
+        self.floating_button_toggle.setChecked(True)
+        self.floating_button_toggle.clicked.connect(self._toggle_floating_button)
+        self.floating_button_toggle.setToolTip("Toggle small always-on-top button for OptiShot mode")
+        
         self.club_combo = QComboBox()
         self.club_combo.addItems(["Driver", "5-Wood", "7-Iron", "PW"])
-        self.capture_button = QPushButton("Capture Mock Shot" if self.mock_mode else "Capture Device Shot")
-        self.capture_button.clicked.connect(self._capture_shot)
         self.import_button = QPushButton("Import Session")
         self.import_button.clicked.connect(self._import_session)
         self.clear_button = QPushButton("Clear Session")
@@ -105,11 +110,10 @@ class MainWindow(QMainWindow):
         self.export_button.clicked.connect(self._export_session)
         top_bar.addWidget(self.mode_label)
         top_bar.addWidget(self.led_indicator)
-        top_bar.addWidget(self.auto_detect_checkbox)
+        top_bar.addWidget(self.floating_button_toggle)
         top_bar.addStretch()
         top_bar.addWidget(QLabel("Club:"))
         top_bar.addWidget(self.club_combo)
-        top_bar.addWidget(self.capture_button)
         top_bar.addWidget(self.import_button)
         top_bar.addWidget(self.clear_button)
         top_bar.addWidget(self.export_button)
@@ -170,6 +174,11 @@ class MainWindow(QMainWindow):
         self.auto_detect_timer = QTimer()
         self.auto_detect_timer.timeout.connect(self._check_for_swing)
         self.auto_detect_timer.setInterval(50)  # Check every 50ms
+        
+        # Start auto-detect automatically in device mode
+        if not self.mock_mode:
+            self.auto_detect_timer.start()
+            self.statusBar().showMessage("Auto-detect active - waiting for swing...", 3000)
 
     def _set_led_green(self) -> None:
         """Set LED indicator to green (ready)."""
@@ -181,23 +190,6 @@ class MainWindow(QMainWindow):
         self.led_indicator.setStyleSheet("font-size: 20px; color: #ff0000;")
         self.led_indicator.setToolTip("Pad Status: Busy")
     
-    def _toggle_auto_detect(self, state: int) -> None:
-        """Enable or disable automatic swing detection."""
-        self.auto_detect_enabled = (state == 2)  # Qt.CheckState.Checked
-        
-        if self.auto_detect_enabled:
-            self._error_disabled = False  # Clear error flag when re-enabling
-            self.capture_button.setEnabled(False)
-            self.auto_detect_timer.start()
-            self.statusBar().showMessage("Auto-detect enabled - waiting for swing...")
-        else:
-            self.auto_detect_timer.stop()
-            self.capture_button.setEnabled(True)
-            # Only show "disabled" message if it wasn't an error that caused the disable
-            if not self._error_disabled:
-                self.statusBar().showMessage("Auto-detect disabled")
-            self._error_disabled = False  # Reset flag
-
     def _check_for_swing(self) -> None:
         """Check for swing detection in auto-detect mode."""
         if not self.auto_detect_enabled or self.mock_mode:
@@ -231,12 +223,10 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage(error_msg, 4000)
                 self._set_led_green()
             else:
-                # Fatal device error - disable auto-detect
+                # Fatal device error - log and display but keep trying
                 error_msg = f"Device Error: {exc}"
                 self._log_error(error_msg)
                 self.statusBar().showMessage(error_msg, 10000)
-                self._error_disabled = True
-                self.auto_detect_checkbox.setChecked(False)
                 self._set_led_green()
         except Exception as exc:
             # Log unexpected errors but keep auto-detect running
@@ -481,8 +471,89 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 self.statusBar().showMessage(f"Export failed: {e}", 5000)
 
+    def _setup_system_tray(self) -> None:
+        """Setup system tray icon for quick access."""
+        # Create system tray icon
+        self.tray_icon = QSystemTrayIcon(self)
+        
+        # Use a simple colored icon (you can replace with a proper icon file later)
+        from PyQt6.QtGui import QPixmap, QPainter, QColor
+        pixmap = QPixmap(64, 64)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setBrush(QColor(0, 120, 215))  # Blue color
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(8, 8, 48, 48)
+        painter.end()
+        self.tray_icon.setIcon(QIcon(pixmap))
+        
+        # Create tray menu
+        tray_menu = QMenu()
+        
+        show_action = QAction("Show RangeLens", self)
+        show_action.triggered.connect(self._bring_to_front)
+        tray_menu.addAction(show_action)
+        
+        tray_menu.addSeparator()
+        
+        quit_action = QAction("Exit", self)
+        quit_action.triggered.connect(self.close)
+        tray_menu.addAction(quit_action)
+        
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.activated.connect(self._tray_icon_activated)
+        self.tray_icon.setToolTip(f"{APP_NAME} - Click to show window")
+        self.tray_icon.show()
+    
+    def _tray_icon_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        """Handle tray icon click."""
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:  # Single click
+            self._bring_to_front()
+    
+    def _bring_to_front(self) -> None:
+        """Bring RangeLens window to front and activate it."""
+        self.showNormal()  # Restore if minimized
+        self.activateWindow()  # Activate the window
+        self.raise_()  # Bring to front
+    
+    def _setup_floating_button(self) -> None:
+        """Setup small floating button for OptiShot mode."""
+        try:
+            self.floating_button = FloatingButton(self)
+            self.floating_button.show()
+        except Exception as e:
+            import logging
+            logging.warning(f"Failed to create floating button: {e}")
+            # Disable the toggle button if floating button fails
+            self.floating_button_toggle.setEnabled(False)
+            self.floating_button_toggle.setToolTip("Floating button unavailable")
+            self.floating_button = None
+    
+    def _toggle_floating_button(self, checked: bool) -> None:
+        """Show or hide the floating button."""
+        if not self.floating_button:
+            return
+        
+        if checked:
+            self.floating_button.show()
+            self.floating_button_toggle.setText("Hide Floating Button")
+            self.statusBar().showMessage("Floating button shown - drag to reposition", 3000)
+        else:
+            self.floating_button.hide()
+            self.floating_button_toggle.setText("Show Floating Button")
+            self.statusBar().showMessage("Floating button hidden", 2000)
+    
     def closeEvent(self, event: QCloseEvent) -> None:
         if self.auto_detect_enabled:
             self.auto_detect_timer.stop()
+        
+        # Close floating button
+        if hasattr(self, 'floating_button') and self.floating_button:
+            self.floating_button.close()
+        
+        # Hide tray icon
+        if hasattr(self, 'tray_icon'):
+            self.tray_icon.hide()
+        
         self.session_service.close()
         super().closeEvent(event)

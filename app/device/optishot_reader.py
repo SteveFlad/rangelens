@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import time
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ from app.config import (
     OPTISHOT_SIGNATURE_ORIGIN,
     OPTISHOT_SPEED_CONVERSION_FACTOR,
     OPTISHOT_SUBPACKET_SIZE,
+    OPTISHOT_TIMING_DIVISOR,
     OPTISHOT_VENDOR_ID,
 )
 from app.device.models import DeviceInfo, ShotInput
@@ -146,13 +148,22 @@ class OptiShotShotParser:
     def _build_shot(self, club: str) -> ShotInput:
         speed_elapsed = self._speed_elapsed - self._ball_timing_subtract
         if speed_elapsed <= 0:
-            raise OptiShotDeviceError("OptiShot report did not contain a valid swing speed.")
+            raise OptiShotDeviceError(
+                f"OptiShot report did not contain a valid swing speed. "
+                f"speed_elapsed={speed_elapsed}, _speed_elapsed={self._speed_elapsed}, "
+                f"_ball_timing_subtract={self._ball_timing_subtract}"
+            )
 
         club_speed_mph = (
-            OPTISHOT_SENSOR_SPACING / (speed_elapsed * 18)
+            OPTISHOT_SENSOR_SPACING / (speed_elapsed * OPTISHOT_TIMING_DIVISOR)
         ) * OPTISHOT_SPEED_CONVERSION_FACTOR
         if not 1 <= club_speed_mph <= 160:
-            raise OptiShotDeviceError("OptiShot report produced an invalid club speed.")
+            raise OptiShotDeviceError(
+                f"OptiShot report produced an invalid club speed: {club_speed_mph:.2f} mph. "
+                f"speed_elapsed={speed_elapsed}, _speed_elapsed={self._speed_elapsed}, "
+                f"_ball_timing_subtract={self._ball_timing_subtract}, "
+                f"front_activations={len(self._front_activations)}, back_activations={len(self._back_activations)}"
+            )
 
         x_front = (self._front_window.maximum - self._front_window.minimum) * OPTISHOT_LED_SPACING
         x_back = (self._back_window.maximum - self._back_window.minimum) * OPTISHOT_LED_SPACING
@@ -173,6 +184,14 @@ class OptiShotShotParser:
             )
         path_deg = math.degrees(path_raw * (OPTISHOT_LED_SPACING / OPTISHOT_SENSOR_SPACING))
         path_deg = max(-15.0, min(15.0, path_deg))
+
+        # Log successful shot calculation for debugging
+        logging.info(
+            f"Valid shot detected: club_speed={club_speed_mph:.2f} mph, "
+            f"speed_elapsed={speed_elapsed}, _speed_elapsed={self._speed_elapsed}, "
+            f"_ball_timing_subtract={self._ball_timing_subtract}, "
+            f"front_activations={len(self._front_activations)}, back_activations={len(self._back_activations)}"
+        )
 
         return ShotInput(
             timestamp=datetime.now(UTC),
@@ -242,6 +261,10 @@ class OptiShotReader:
             elapsed = current_time - self._parser._first_data_time
             if elapsed > self._parser_timeout:
                 # Reset parser - it's been collecting noise, not a real swing
+                logging.debug(
+                    f"Parser timeout: accumulated data for {elapsed:.2f}s without completing a shot. "
+                    f"Likely noise. Resetting parser."
+                )
                 self._parser.reset()
                 self._previous_report = None
                 return None
