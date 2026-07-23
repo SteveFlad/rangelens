@@ -70,6 +70,7 @@ class MainWindow(QMainWindow):
         self.session_service = SessionService(mock_mode=mock_mode)
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         self.resize(1100, 700)
+        self.showMaximized()  # Start in maximized window
         self.auto_detect_enabled = not mock_mode  # Auto-detect always on in device mode
         self._error_disabled = False  # Track if disabled due to error
         self._last_shot_time = 0.0  # Track time of last detected shot for cooldown

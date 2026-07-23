@@ -1,0 +1,10 @@
+{
+    "platformio-ide.activateProjectOnTextEditorChange": false,
+    "platformio-ide.autoRebuildAutocompleteIndex": false,
+    "platformio-ide.disablePIOHomeStartup": false,
+    "C_Cpp.errorSquiggles": "enabled",
+    "C_Cpp.intelliSenseEngine": "default",
+    "files.associations": {
+        "*.ino": "cpp"
+    }
+}

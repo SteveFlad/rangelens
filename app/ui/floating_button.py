@@ -66,8 +66,9 @@ class FloatingButton(QWidget):
             if screen:
                 geometry = screen.geometry()
                 # Position with some margin from edge
-                x = geometry.width() - self.width() - 20
-                y = geometry.height() - self.height() - 80  # Account for taskbar
+                # Use geometry.x() and geometry.y() to account for screen position
+                x = geometry.x() + geometry.width() - self.width() - 20
+                y = geometry.y() + geometry.height() - self.height() - 80  # Account for taskbar
                 self.move(x, y)
             else:
                 # Fallback position
