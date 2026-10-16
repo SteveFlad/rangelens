@@ -1,8 +1,13 @@
 import argparse
 import logging
 import sys
+from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication
+
+if __package__ in (None, ""):
+    # Support direct execution: python app/main.py
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.ui.main_window import MainWindow
 
