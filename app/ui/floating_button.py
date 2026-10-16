@@ -54,6 +54,7 @@ class FloatingButton(QWidget):
         # Install event filter to capture button's mouse events
         self.button.installEventFilter(self)
         layout.addWidget(self.button)
+        self.update_button_label(next_action_show_rangelens=True)
         
         # Position after a short delay to ensure Qt is fully initialized
         QTimer.singleShot(100, self._position_initial)
@@ -77,11 +78,17 @@ class FloatingButton(QWidget):
             # If anything goes wrong, use a safe default position
             self.move(100, 100)
     
-    def _show_main_window(self):
-        """Bring main window to front."""
-        self.main_window.showNormal()
-        self.main_window.activateWindow()
-        self.main_window.raise_()
+    def update_button_label(self, next_action_show_rangelens: bool) -> None:
+        """Update button text to indicate what the next click will show."""
+        if next_action_show_rangelens:
+            self.button.setText("RL\nShow")
+        else:
+            self.button.setText("OS\nShow")
+
+    def _toggle_window_target(self) -> None:
+        """Toggle between showing RangeLens and revealing OptiShot."""
+        is_rangelens_shown = self.main_window.toggle_rangelens_optishot()
+        self.update_button_label(next_action_show_rangelens=not is_rangelens_shown)
     
     def eventFilter(self, obj, event):
         """Filter events from the button to handle dragging."""
@@ -119,14 +126,14 @@ class FloatingButton(QWidget):
         """Stop dragging or show main window on click."""
         if event.button() == Qt.MouseButton.LeftButton:
             if not self.dragging and self.mouse_press_pos:
-                # This was a click, not a drag - show main window
-                self._show_main_window()
+                # This was a click, not a drag - toggle displayed app
+                self._toggle_window_target()
             self.dragging = False
             self.mouse_press_pos = None
             event.accept()
     
     def mouseDoubleClickEvent(self, event: QMouseEvent):
-        """Double-click to show main window."""
+        """Double-click to toggle displayed app."""
         if event.button() == Qt.MouseButton.LeftButton:
-            self._show_main_window()
+            self._toggle_window_target()
             event.accept()

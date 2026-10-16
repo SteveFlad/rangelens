@@ -28,6 +28,7 @@ from app.config import APP_NAME, APP_VERSION
 from app.device.optishot_reader import OptiShotDeviceError
 from app.services.session_service import SessionService
 from app.ui.floating_button import FloatingButton
+from app.ui.window_toggle import should_show_optishot
 
 
 def _describe_face_angle(face_angle_deg: float) -> str:
@@ -513,9 +514,35 @@ class MainWindow(QMainWindow):
     
     def _bring_to_front(self) -> None:
         """Bring RangeLens window to front and activate it."""
-        self.showNormal()  # Restore if minimized
-        self.activateWindow()  # Activate the window
-        self.raise_()  # Bring to front
+        self._show_rangelens_fullscreen()
+        if hasattr(self, 'floating_button') and self.floating_button:
+            self.floating_button.update_button_label(next_action_show_rangelens=False)
+
+    def _show_rangelens_fullscreen(self) -> None:
+        """Show RangeLens in fullscreen and bring it to front."""
+        self.show()
+        self.showFullScreen()
+        self.activateWindow()
+        self.raise_()
+
+    def _show_optishot(self) -> None:
+        """Minimize RangeLens so the OptiShot app is visible."""
+        self.showMinimized()
+
+    def toggle_rangelens_optishot(self) -> bool:
+        """Toggle between showing RangeLens and revealing OptiShot.
+
+        Returns True when RangeLens is shown, False when minimized.
+        """
+        if should_show_optishot(
+            rangelens_visible=self.isVisible(),
+            rangelens_minimized=self.isMinimized(),
+        ):
+            self._show_optishot()
+            return False
+
+        self._show_rangelens_fullscreen()
+        return True
     
     def _setup_floating_button(self) -> None:
         """Setup small floating button for OptiShot mode."""
