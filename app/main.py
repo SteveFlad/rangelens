@@ -3,7 +3,18 @@ import logging
 import sys
 from pathlib import Path
 
-from PyQt6.QtWidgets import QApplication
+try:
+    from PyQt6.QtWidgets import QApplication
+except ModuleNotFoundError as exc:
+    if exc.name == "PyQt6":
+        raise SystemExit(
+            "PyQt6 is not installed in the active Python environment.\n"
+            "Activate the project venv and install dependencies:\n"
+            "  .\\.venv\\Scripts\\Activate.ps1\n"
+            "  pip install -r requirements.txt\n"
+            "Then run: python -m app.main --mock"
+        ) from exc
+    raise
 
 if __package__ in (None, ""):
     # Support direct execution: python app/main.py
